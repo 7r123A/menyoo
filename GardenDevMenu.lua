@@ -428,29 +428,56 @@ local spyHooked = false
 local function hookSpy()
     if spyHooked then return end
     spyHooked = true
-    pcall(function()
+
+    local function logCall(name, ...)
+        local args = {...}
+        local parts = {}
+        for _, a in ipairs(args) do
+            local ok, s = pcall(serializeArg, a)
+            table.insert(parts, ok and s or "?")
+        end
+        local line = name .. "(" .. table.concat(parts, ", ") .. ")"
+        table.insert(spyLogs, 1, line)
+        if #spyLogs > 40 then table.remove(spyLogs) end
+    end
+
+    -- Method 1: __namecall hook (works on most executors)
+    local hookedNamecall = pcall(function()
         local mt  = getrawmetatable(game)
+        if not mt or not mt.__namecall then error("no mt") end
         local old = mt.__namecall
         setreadonly(mt, false)
-        mt.__namecall = newcclosure(function(self, ...)
-            local method = getnamecallmethod()
-            if spyActive and method == "FireServer" then
-                local ok, isRE = pcall(function() return self:IsA("RemoteEvent") end)
-                if ok and isRE then
-                    local args = {...}
-                    local parts = {}
-                    for _, a in ipairs(args) do
-                        table.insert(parts, serializeArg(a))
+        local hookFn = function(self, ...)
+            local method = getnamecallmethod and getnamecallmethod()
+            if spyActive and (method == "FireServer" or method == "InvokeServer") then
+                pcall(function()
+                    if self:IsA("RemoteEvent") or self:IsA("RemoteFunction") then
+                        logCall(self.Name, ...)
                     end
-                    local line = self.Name .. "(" .. table.concat(parts, ", ") .. ")"
-                    table.insert(spyLogs, 1, line)
-                    if #spyLogs > 40 then table.remove(spyLogs) end
-                end
+                end)
             end
             return old(self, ...)
-        end)
+        end
+        -- newcclosure is optional — use it if available, otherwise use plain function
+        mt.__namecall = (newcclosure and newcclosure(hookFn)) or hookFn
         setreadonly(mt, true)
     end)
+
+    -- Method 2: hookfunction on FireServer directly (Xeno / some executors)
+    if not hookedNamecall then
+        pcall(function()
+            if not hookfunction then return end
+            local RE = Instance.new("RemoteEvent")
+            local origFire = RE.FireServer
+            RE:Destroy()
+            hookfunction(origFire, function(self, ...)
+                if spyActive then
+                    pcall(function() logCall(self.Name, ...) end)
+                end
+                return origFire(self, ...)
+            end)
+        end)
+    end
 end
 
 -- ── GUI ───────────────────────────────────────────────────────────────────
