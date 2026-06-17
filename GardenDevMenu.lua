@@ -4,13 +4,22 @@ local UserInputService       = game:GetService("UserInputService")
 local ProximityPromptService = game:GetService("ProximityPromptService")
 
 local player    = Players.LocalPlayer
-local character = player.Character or player.CharacterAdded:Wait()
-local rootPart  = character:WaitForChild("HumanoidRootPart")
+local character = player.Character
+local rootPart  = nil
 
-player.CharacterAdded:Connect(function(c)
+local function onCharacter(c)
     character = c
-    rootPart  = c:WaitForChild("HumanoidRootPart")
-end)
+    rootPart  = c:WaitForChild("HumanoidRootPart", 10)
+end
+
+if character then
+    onCharacter(character)
+else
+    player.CharacterAdded:Wait()
+    onCharacter(player.Character)
+end
+
+player.CharacterAdded:Connect(onCharacter)
 
 -- ── Theme ─────────────────────────────────────────────────────────────────
 
@@ -393,9 +402,11 @@ end
 local spyActive = false
 local spyLogs   = {}   -- newest first
 
-local function serializeArg(a)
+local function serializeArg(a, depth)
+    depth = depth or 0
+    if depth > 2 then return "..." end
     local t = type(a)
-    if t == "string"  then return '"' .. a:sub(1, 40) .. '"' end
+    if t == "string"  then return '"' .. a:sub(1, 30) .. '"' end
     if t == "number"  then return tostring(a) end
     if t == "boolean" then return tostring(a) end
     if t == "table"   then
@@ -403,9 +414,10 @@ local function serializeArg(a)
         local n = 0
         for k, v in pairs(a) do
             n = n + 1
-            if n > 4 then table.insert(parts, "..."); break end
-            local ks = type(k) == "number" and ("[" .. k .. "]") or tostring(k)
-            table.insert(parts, ks .. "=" .. serializeArg(v))
+            if n > 3 then table.insert(parts, "..."); break end
+            local ks = type(k) == "number" and ("[" .. k .. "]") or tostring(k):sub(1,10)
+            local ok, vs = pcall(serializeArg, v, depth + 1)
+            table.insert(parts, ks .. "=" .. (ok and vs or "?"))
         end
         return "{" .. table.concat(parts, ",") .. "}"
     end
@@ -759,36 +771,30 @@ local scanPad = Instance.new("UIPadding", ScanScroll)
 scanPad.PaddingTop = UDim.new(0, 4); scanPad.PaddingBottom = UDim.new(0, 4)
 scanPad.PaddingLeft = UDim.new(0, 4)
 
+-- FIX: never call stroke() here — it creates a new UIStroke every call (memory leak).
+-- Update the existing one instead.
+local scanStroke = ScanOverlay:FindFirstChildOfClass("UIStroke")
+
 local function populateScanOverlay(lines, title, color)
     for _, c in ipairs(ScanScroll:GetChildren()) do
         if c:IsA("TextLabel") then c:Destroy() end
     end
-    ScanTitle.Text      = title
+    ScanTitle.Text       = title
     ScanTitle.TextColor3 = color or T.Blue
-    stroke(ScanOverlay, color or T.Blue, 1.5)
-    if #lines == 0 then
+    if scanStroke then scanStroke.Color = color or T.Blue end
+    local items = (#lines > 0) and lines or {"Nothing captured yet..."}
+    for i, line in ipairs(items) do
         local lbl = Instance.new("TextLabel", ScanScroll)
-        lbl.Size                   = UDim2.new(1, 0, 0, 30)
+        lbl.Size                   = UDim2.new(1, -4, 0, 20)
         lbl.BackgroundTransparency = 1
-        lbl.Text                   = "Nothing captured yet..."
-        lbl.TextColor3             = T.Sub
+        lbl.Text                   = line
+        lbl.TextColor3             = (#lines > 0) and T.Text or T.Sub
         lbl.Font                   = Enum.Font.Gotham
-        lbl.TextSize               = 12
+        lbl.TextSize               = 11
+        lbl.TextXAlignment         = Enum.TextXAlignment.Left
+        lbl.TextTruncate           = Enum.TextTruncate.AtEnd
+        lbl.LayoutOrder            = i
         lbl.ZIndex                 = 22
-    else
-        for i, line in ipairs(lines) do
-            local lbl = Instance.new("TextLabel", ScanScroll)
-            lbl.Size                   = UDim2.new(1, -4, 0, 20)
-            lbl.BackgroundTransparency = 1
-            lbl.Text                   = line
-            lbl.TextColor3             = T.Text
-            lbl.Font                   = Enum.Font.Gotham
-            lbl.TextSize               = 11
-            lbl.TextXAlignment         = Enum.TextXAlignment.Left
-            lbl.TextTruncate           = Enum.TextTruncate.AtEnd
-            lbl.LayoutOrder            = i
-            lbl.ZIndex                 = 22
-        end
     end
     ScanOverlay.Visible = true
 end
@@ -797,12 +803,11 @@ ScanRemotesBtn.MouseButton1Click:Connect(function()
     local names = scanRemoteNames()
     local rc = 0
     for _ in pairs(capturedReplicas) do rc = rc + 1 end
-    populateScanOverlay(names,
-        string.format("🔎 Remotes: %d  |  Replicas: %d", #names - 7, rc),
-        T.Blue)
+    populateScanOverlay(names, string.format("Remotes: %d  Replicas: %d", #names - 6, rc), T.Blue)
 end)
 
--- Spy button: toggle spy mode, show live log in overlay
+-- Spy: toggle mode. Auto-refresh only updates the TITLE (not labels) every 2s
+-- to avoid creating/destroying 40 instances per second.
 local spyThread = nil
 SpyBtn.MouseButton1Click:Connect(function()
     spyActive = not spyActive
@@ -811,30 +816,28 @@ SpyBtn.MouseButton1Click:Connect(function()
         spyLogs = {}
         SpyBtn.Text = "👁  Spy: ON"
         tw(SpyBtn, {BackgroundColor3 = SpyOnColor}, 0.15)
-        populateScanOverlay({}, "👁 Spy Mode — do something in-game...", Color3.fromRGB(180,60,220))
-        -- auto-refresh overlay every second
+        populateScanOverlay({}, "Spy ON — do something in-game...", Color3.fromRGB(180,60,220))
         spyThread = task.spawn(function()
             while spyActive do
-                task.wait(1)
-                if ScanOverlay.Visible then
-                    local logs = {}
-                    for i, l in ipairs(spyLogs) do
-                        table.insert(logs, tostring(i) .. ". " .. l)
-                    end
-                    populateScanOverlay(
-                        #logs > 0 and logs or {},
-                        "👁 Spy  |  " .. #spyLogs .. " calls captured",
-                        Color3.fromRGB(180,60,220)
-                    )
-                end
+                task.wait(2)
+                -- Only update title text — no instance creation in the loop
+                ScanTitle.Text = "Spy | " .. #spyLogs .. " calls (press Scan to view)"
             end
         end)
-        ScanOverlay.Visible = true
     else
         SpyBtn.Text = "👁  Spy: OFF"
         tw(SpyBtn, {BackgroundColor3 = SpyOffColor}, 0.15)
         if spyThread then task.cancel(spyThread); spyThread = nil end
-        ScanOverlay.Visible = false
+        -- Show captured logs when spy is turned off
+        if #spyLogs > 0 then
+            local logs = {}
+            for i, l in ipairs(spyLogs) do
+                table.insert(logs, i .. ". " .. l)
+            end
+            populateScanOverlay(logs, "Spy Results: " .. #spyLogs .. " calls", Color3.fromRGB(180,60,220))
+        else
+            ScanOverlay.Visible = false
+        end
     end
 end)
 
@@ -1144,6 +1147,7 @@ end)
 local function startAutoLoop()
     autoThread = task.spawn(function()
         while autoOn do
+            task.wait(0.5) -- FIX: guarantee yield every iteration, prevents busy-loop
             if #foundCrops == 0 then
                 foundCrops = findAllCrops()
                 StatsLbl.Text = string.format("✅ %d crops found", #foundCrops)
@@ -1155,8 +1159,8 @@ local function startAutoLoop()
                 if not autoOn then break end
                 if entry.obj and entry.obj.Parent then
                     collectOne(entry)
-                    task.wait(0.4)
                 end
+                task.wait(0.4) -- FIX: always yield, even if entry was skipped
             end
             if autoOn then
                 task.wait(1)
