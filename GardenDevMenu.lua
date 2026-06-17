@@ -261,39 +261,6 @@ task.spawn(function()
     task.wait(0.2)
     if ReplicaReqData then pcall(function() ReplicaReqData:FireServer() end) end
     if RequestState   then pcall(function() RequestState:FireServer()   end) end
-
-    -- Exploit-function fallback: read existing ReplicaController connections
-    task.wait(1.5)
-    if next(capturedReplicas) == nil then
-        pcall(function()
-            if not (getconnections and ReplicaCreate) then return end
-            for _, conn in ipairs(getconnections(ReplicaCreate.OnClientEvent)) do
-                if conn.Function and getupvalues then
-                    for _, up in ipairs(getupvalues(conn.Function)) do
-                        if type(up) == "table" then
-                            for k, v in pairs(up) do
-                                if type(k) == "number" and type(v) == "table" then
-                                    capturedReplicas[k] = v
-                                end
-                            end
-                        end
-                    end
-                end
-            end
-        end)
-        -- gc scan: look for tables with numeric Id field (ReplicaService replica objects)
-        pcall(function()
-            if not getgc then return end
-            for _, v in ipairs(getgc(false)) do
-                if type(v) == "table" then
-                    local id = rawget(v, "Id") or rawget(v, "id")
-                    if type(id) == "number" and rawget(v, "Data") ~= nil then
-                        capturedReplicas[id] = v
-                    end
-                end
-            end
-        end)
-    end
 end)
 
 local MONEY_PATHS = {"Money","Coins","Cash","Currency","Gold","Gems","Bucks",
@@ -412,11 +379,66 @@ local function scanRemoteNames()
     for _ in pairs(lastCharmState) do charmKeys = charmKeys + 1 end
     table.insert(names, "")
     table.insert(names, "--- Status ---")
-    table.insert(names, "Replicas captured: " .. replicaCount)
-    table.insert(names, "Packet remote: " .. (PacketRemote and "found" or "NOT FOUND"))
+    table.insert(names, "Replicas: " .. replicaCount)
+    table.insert(names, "Packet: " .. (PacketRemote and PacketRemote:GetFullName() or "NOT FOUND"))
     table.insert(names, "SyncState: " .. (SyncState and "found" or "NOT FOUND"))
     table.insert(names, "Charm keys: " .. charmKeys)
     return names
+end
+
+-- ── Remote Spy ────────────────────────────────────────────────────────────
+-- Hooks __namecall to intercept every FireServer call so we can see
+-- exactly what the game sends when you buy seeds / earn money normally.
+
+local spyActive = false
+local spyLogs   = {}   -- newest first
+
+local function serializeArg(a)
+    local t = type(a)
+    if t == "string"  then return '"' .. a:sub(1, 40) .. '"' end
+    if t == "number"  then return tostring(a) end
+    if t == "boolean" then return tostring(a) end
+    if t == "table"   then
+        local parts = {}
+        local n = 0
+        for k, v in pairs(a) do
+            n = n + 1
+            if n > 4 then table.insert(parts, "..."); break end
+            local ks = type(k) == "number" and ("[" .. k .. "]") or tostring(k)
+            table.insert(parts, ks .. "=" .. serializeArg(v))
+        end
+        return "{" .. table.concat(parts, ",") .. "}"
+    end
+    return t
+end
+
+local spyHooked = false
+local function hookSpy()
+    if spyHooked then return end
+    spyHooked = true
+    pcall(function()
+        local mt  = getrawmetatable(game)
+        local old = mt.__namecall
+        setreadonly(mt, false)
+        mt.__namecall = newcclosure(function(self, ...)
+            local method = getnamecallmethod()
+            if spyActive and method == "FireServer" then
+                local ok, isRE = pcall(function() return self:IsA("RemoteEvent") end)
+                if ok and isRE then
+                    local args = {...}
+                    local parts = {}
+                    for _, a in ipairs(args) do
+                        table.insert(parts, serializeArg(a))
+                    end
+                    local line = self.Name .. "(" .. table.concat(parts, ", ") .. ")"
+                    table.insert(spyLogs, 1, line)
+                    if #spyLogs > 40 then table.remove(spyLogs) end
+                end
+            end
+            return old(self, ...)
+        end)
+        setreadonly(mt, true)
+    end)
 end
 
 -- ── GUI ───────────────────────────────────────────────────────────────────
@@ -620,9 +642,9 @@ SeedsContent.BorderSizePixel        = 0
 SeedsContent.ZIndex                 = 5
 SeedsContent.Visible                = false
 
--- SeedScroll y=0..254, buttons at 262/304/346/388
+-- SeedScroll y=0..208, buttons at 216/258/300/342/384
 local SeedScroll = Instance.new("ScrollingFrame", SeedsContent)
-SeedScroll.Size                   = UDim2.new(1, -16, 0, 254)
+SeedScroll.Size                   = UDim2.new(1, -16, 0, 208)
 SeedScroll.Position               = UDim2.new(0, 8, 0, 0)
 SeedScroll.BackgroundTransparency = 1
 SeedScroll.BorderSizePixel        = 0
@@ -657,13 +679,19 @@ local function makeSeedBtn(text, color, yAbs, textColor)
     return btn
 end
 
-local ScanRemotesBtn   = makeSeedBtn("🔎  Scan Remotes",      T.Blue,  262)
-local GiveMoneyBtn     = makeSeedBtn("💰  Give $100,000",     T.Gold,  304, T.DarkText)
-local Give10MBtn       = makeSeedBtn("💎  Give $10,000,000",  T.Gold,  346, T.DarkText)
-local ClaimAllSeedsBtn = makeSeedBtn("🌱  Claim All Seeds",   T.Green, 388)
+local ScanRemotesBtn   = makeSeedBtn("🔎  Scan Remotes",      T.Blue,  216)
+local SpyBtn           = makeSeedBtn("👁  Spy: OFF",           Color3.fromRGB(100,60,180), 258)
+local GiveMoneyBtn     = makeSeedBtn("💰  Give $100,000",     T.Gold,  300, T.DarkText)
+local Give10MBtn       = makeSeedBtn("💎  Give $10,000,000",  T.Gold,  342, T.DarkText)
+local ClaimAllSeedsBtn = makeSeedBtn("🌱  Claim All Seeds",   T.Green, 384)
+
+local SpyOffColor = Color3.fromRGB(100,60,180)
+local SpyOnColor  = Color3.fromRGB(180,60,220)
 
 ScanRemotesBtn.MouseEnter:Connect(function()   tw(ScanRemotesBtn,   {BackgroundColor3 = T.Blue:Lerp(T.White, 0.2)}, 0.12) end)
 ScanRemotesBtn.MouseLeave:Connect(function()   tw(ScanRemotesBtn,   {BackgroundColor3 = T.Blue},  0.12) end)
+SpyBtn.MouseEnter:Connect(function()           tw(SpyBtn,           {BackgroundColor3 = (spyActive and SpyOnColor or SpyOffColor):Lerp(T.White, 0.2)}, 0.12) end)
+SpyBtn.MouseLeave:Connect(function()           tw(SpyBtn,           {BackgroundColor3 = spyActive and SpyOnColor or SpyOffColor}, 0.12) end)
 GiveMoneyBtn.MouseEnter:Connect(function()     tw(GiveMoneyBtn,     {BackgroundColor3 = T.Gold:Lerp(T.White, 0.2)}, 0.12) end)
 GiveMoneyBtn.MouseLeave:Connect(function()     tw(GiveMoneyBtn,     {BackgroundColor3 = T.Gold},  0.12) end)
 Give10MBtn.MouseEnter:Connect(function()       tw(Give10MBtn,       {BackgroundColor3 = T.Gold:Lerp(T.White, 0.2)}, 0.12) end)
@@ -731,29 +759,28 @@ local scanPad = Instance.new("UIPadding", ScanScroll)
 scanPad.PaddingTop = UDim.new(0, 4); scanPad.PaddingBottom = UDim.new(0, 4)
 scanPad.PaddingLeft = UDim.new(0, 4)
 
-ScanRemotesBtn.MouseButton1Click:Connect(function()
+local function populateScanOverlay(lines, title, color)
     for _, c in ipairs(ScanScroll:GetChildren()) do
         if c:IsA("TextLabel") then c:Destroy() end
     end
-    local names = scanRemoteNames()
-    local replicaCount = 0
-    for _ in pairs(capturedReplicas) do replicaCount += 1 end
-    ScanTitle.Text = string.format("🔎 %d Remotes  |  %d Replicas", #names, replicaCount)
-    if #names == 0 then
+    ScanTitle.Text      = title
+    ScanTitle.TextColor3 = color or T.Blue
+    stroke(ScanOverlay, color or T.Blue, 1.5)
+    if #lines == 0 then
         local lbl = Instance.new("TextLabel", ScanScroll)
         lbl.Size                   = UDim2.new(1, 0, 0, 30)
         lbl.BackgroundTransparency = 1
-        lbl.Text                   = "⚠️ None found — enter a game first"
+        lbl.Text                   = "Nothing captured yet..."
         lbl.TextColor3             = T.Sub
         lbl.Font                   = Enum.Font.Gotham
         lbl.TextSize               = 12
         lbl.ZIndex                 = 22
     else
-        for i, name in ipairs(names) do
+        for i, line in ipairs(lines) do
             local lbl = Instance.new("TextLabel", ScanScroll)
-            lbl.Size                   = UDim2.new(1, -4, 0, 22)
+            lbl.Size                   = UDim2.new(1, -4, 0, 20)
             lbl.BackgroundTransparency = 1
-            lbl.Text                   = "• " .. name
+            lbl.Text                   = line
             lbl.TextColor3             = T.Text
             lbl.Font                   = Enum.Font.Gotham
             lbl.TextSize               = 11
@@ -764,6 +791,51 @@ ScanRemotesBtn.MouseButton1Click:Connect(function()
         end
     end
     ScanOverlay.Visible = true
+end
+
+ScanRemotesBtn.MouseButton1Click:Connect(function()
+    local names = scanRemoteNames()
+    local rc = 0
+    for _ in pairs(capturedReplicas) do rc = rc + 1 end
+    populateScanOverlay(names,
+        string.format("🔎 Remotes: %d  |  Replicas: %d", #names - 7, rc),
+        T.Blue)
+end)
+
+-- Spy button: toggle spy mode, show live log in overlay
+local spyThread = nil
+SpyBtn.MouseButton1Click:Connect(function()
+    spyActive = not spyActive
+    if spyActive then
+        hookSpy()
+        spyLogs = {}
+        SpyBtn.Text = "👁  Spy: ON"
+        tw(SpyBtn, {BackgroundColor3 = SpyOnColor}, 0.15)
+        populateScanOverlay({}, "👁 Spy Mode — do something in-game...", Color3.fromRGB(180,60,220))
+        -- auto-refresh overlay every second
+        spyThread = task.spawn(function()
+            while spyActive do
+                task.wait(1)
+                if ScanOverlay.Visible then
+                    local logs = {}
+                    for i, l in ipairs(spyLogs) do
+                        table.insert(logs, tostring(i) .. ". " .. l)
+                    end
+                    populateScanOverlay(
+                        #logs > 0 and logs or {},
+                        "👁 Spy  |  " .. #spyLogs .. " calls captured",
+                        Color3.fromRGB(180,60,220)
+                    )
+                end
+            end
+        end)
+        ScanOverlay.Visible = true
+    else
+        SpyBtn.Text = "👁  Spy: OFF"
+        tw(SpyBtn, {BackgroundColor3 = SpyOffColor}, 0.15)
+        if spyThread then task.cancel(spyThread); spyThread = nil end
+        ScanOverlay.Visible = false
+    end
 end)
 
 -- ── Seed cards ────────────────────────────────────────────────────────────
