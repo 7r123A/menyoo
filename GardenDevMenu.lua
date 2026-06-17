@@ -328,7 +328,7 @@ local function serializeArg(a, depth)
         return "{" .. table.concat(parts, ",") .. "}"
     end
     if t == "userdata" then
-        local ok, nm = pcall(function() return (a :: any).Name end)
+        local ok, nm = pcall(function() return tostring(a.Name) end)
         return ok and ("[" .. nm .. "]") or "userdata"
     end
     return t
@@ -348,7 +348,8 @@ local function hookSpy()
             local ok, s = pcall(serializeArg, a)
             table.insert(parts, ok and s or "?")
         end
-        local name = pcall(function() return remoteObj.Name end) and remoteObj.Name or "?"
+        local _ok, name = pcall(function() return remoteObj.Name end)
+        if not _ok then name = "?" end
         local line = name .. "(" .. table.concat(parts, ", ") .. ")"
         table.insert(spyLogs, 1, line)
         if #spyLogs > 60 then table.remove(spyLogs) end
