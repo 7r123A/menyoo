@@ -1,11 +1,9 @@
--- GardenDevMenu v4.0  |  Xeno v1.3.55 compatible  |  Auto-Learn Spy
 local Players                = game:GetService("Players")
 local TweenService           = game:GetService("TweenService")
 local UserInputService       = game:GetService("UserInputService")
 local ProximityPromptService = game:GetService("ProximityPromptService")
 local RS                     = game:GetService("ReplicatedStorage")
 
--- ── Character (safe, no top-level yield) ──────────────────────────────────
 local player    = Players.LocalPlayer
 local character = player.Character
 local rootPart  = nil
@@ -23,7 +21,6 @@ else
 end
 player.CharacterAdded:Connect(onCharacter)
 
--- ── Theme ─────────────────────────────────────────────────────────────────
 local T = {
     Green     = Color3.fromRGB(50,  200, 100),
     DarkGreen = Color3.fromRGB(30,  150,  70),
@@ -52,7 +49,6 @@ local RARITY_COLOR = {
     Mythic    = Color3.fromRGB(255,  80,  80),
 }
 
--- ── Seeds data ────────────────────────────────────────────────────────────
 local SEEDS = {
     {name="Carrot",         emoji="🥕", rarity="Common"},
     {name="Strawberry",     emoji="🍓", rarity="Common"},
@@ -95,7 +91,6 @@ local SEEDS = {
     {name="Celestial Grape",emoji="🔮", rarity="Mythic"},
 }
 
--- ── UI helpers ────────────────────────────────────────────────────────────
 local function corner(p, r)
     local c = Instance.new("UICorner", p)
     c.CornerRadius = UDim.new(0, r or 10)
@@ -115,7 +110,6 @@ local function tw(obj, props, t, style, dir)
     ), props):Play()
 end
 
--- ── Game helpers ──────────────────────────────────────────────────────────
 local function getPos(obj)
     if not obj or not obj.Parent then return nil end
     local ok, r = pcall(function()
@@ -172,23 +166,11 @@ local function collectOne(entry)
     if entry.pp and entry.pp.Parent then triggerPP(entry.pp) end
 end
 
--- ── Remote discovery ──────────────────────────────────────────────────────
 local function findByParentName(parentName, remoteName)
     for _, d in ipairs(RS:GetDescendants()) do
         if d.Parent and d.Parent.Name == parentName then
             if remoteName == nil or d.Name == remoteName then return d end
         end
-    end
-    return nil
-end
-
--- Also search workspace for remotes (some games put remotes there)
-local function findRemoteAnywhere(name)
-    for _, svc in ipairs({RS, workspace, game:GetService("Players")}) do
-        local ok, r = pcall(function()
-            return svc:FindFirstChild(name, true)
-        end)
-        if ok and r then return r end
     end
     return nil
 end
@@ -205,7 +187,6 @@ local PacketRemote = findByParentName("Packet", "RemoteEvent")
 local SyncState    = findByParentName("Charm",  "SyncState")
 local RequestState = findByParentName("Charm",  "RequestState")
 
--- ── Replica capture ───────────────────────────────────────────────────────
 local capturedReplicas = {}
 local lastCharmState   = {}
 
@@ -271,12 +252,9 @@ task.spawn(function()
     if RequestState   then pcall(function() RequestState:FireServer()   end) end
 end)
 
--- ── Auto-Learn system ─────────────────────────────────────────────────────
--- When the spy sees a FireServer call that looks like buying a seed or adding
--- money, it saves the remote object + args template so we can replay it.
-local learnedSeedRemotes  = {}   -- list of {remote, args}
+local learnedSeedRemotes  = {}
 local learnedMoneyRemotes = {}
-local learnedSeedRemoteUI = nil  -- callback to refresh UI indicator
+local learnedSeedRemoteUI = nil
 
 local SEED_KW  = {"seed","buy","purchase","plant","item","shop","acquire","unlock"}
 local MONEY_KW = {"money","coin","cash","currency","gold","gem","bucks","sheckle",
@@ -294,7 +272,6 @@ local function tryLearnCall(remoteObj, ...)
     if not remoteObj or not remoteObj.Parent then return end
     local name = remoteObj.Name
     local args = {...}
-    -- Check remote name + all string args for keywords
     local argsStr = ""
     for _, a in ipairs(args) do
         if type(a) == "string" then argsStr = argsStr .. " " .. a end
@@ -308,13 +285,12 @@ local function tryLearnCall(remoteObj, ...)
     local combined = name .. " " .. argsStr
 
     if strContainsAny(combined, SEED_KW) then
-        -- Don't duplicate
         local already = false
         for _, lr in ipairs(learnedSeedRemotes) do
             if lr.remote == remoteObj then already = true; break end
         end
         if not already then
-            table.insert(learnedSeedRemotes, {remote = remoteObj, args = args, name = name})
+            table.insert(learnedSeedRemotes, {remote=remoteObj, args=args, name=name})
             if learnedSeedRemoteUI then pcall(learnedSeedRemoteUI) end
         end
     end
@@ -325,12 +301,11 @@ local function tryLearnCall(remoteObj, ...)
             if lr.remote == remoteObj then already = true; break end
         end
         if not already then
-            table.insert(learnedMoneyRemotes, {remote = remoteObj, args = args, name = name})
+            table.insert(learnedMoneyRemotes, {remote=remoteObj, args=args, name=name})
         end
     end
 end
 
--- ── Remote spy ────────────────────────────────────────────────────────────
 local spyActive = false
 local spyLogs   = {}
 
@@ -366,7 +341,6 @@ local function hookSpy()
 
     local function logCall(remoteObj, ...)
         local args = {...}
-        -- Auto-learn
         pcall(tryLearnCall, remoteObj, ...)
         if not spyActive then return end
         local parts = {}
@@ -380,7 +354,6 @@ local function hookSpy()
         if #spyLogs > 60 then table.remove(spyLogs) end
     end
 
-    -- ── Method 1: hookmetamethod (Xeno primary API) ──────────────────────
     local ok1 = pcall(function()
         if not hookmetamethod then error("no hookmetamethod") end
         local old; old = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
@@ -396,7 +369,6 @@ local function hookSpy()
         end))
     end)
 
-    -- ── Method 2: getrawmetatable + setreadonly (fallback) ────────────────
     if not ok1 then
         pcall(function()
             local mt = getrawmetatable(game)
@@ -419,7 +391,6 @@ local function hookSpy()
         end)
     end
 
-    -- ── Method 3: hookfunction on FireServer prototype (last resort) ──────
     pcall(function()
         if not hookfunction then return end
         local dummy = Instance.new("RemoteEvent")
@@ -437,10 +408,8 @@ local function hookSpy()
     end)
 end
 
--- Always hook spy at startup (auto-learn works even when spy display is OFF)
 task.spawn(hookSpy)
 
--- ── Money & Seed exploit ──────────────────────────────────────────────────
 local MONEY_KEYS = {"Money","Coins","Cash","Currency","Gold","Gems","Bucks",
                     "Sheckles","Credits","Points","Balance","Wallet","Dollars"}
 
@@ -505,17 +474,14 @@ local function replicaInsertSeed(seedName)
     end
 end
 
--- Replay a learned remote, substituting the seed name into string args
 local function replayLearnedSeed(seedName)
     if #learnedSeedRemotes == 0 then return end
     for _, lr in ipairs(learnedSeedRemotes) do
         local remote = lr.remote
         if not remote or not remote.Parent then continue end
-        -- Build modified args: replace old seed name strings with new one
         local newArgs = {}
         for _, a in ipairs(lr.args) do
             if type(a) == "string" then
-                -- If arg was a seed name, replace with new seed name
                 local isOldSeed = false
                 for _, s in ipairs(SEEDS) do
                     if a == s.name then isOldSeed = true; break end
@@ -540,7 +506,6 @@ local function replayLearnedSeed(seedName)
             end
         end
         pcall(function() remote:FireServer(table.unpack(newArgs)) end)
-        -- Also fire with just the seed name appended
         pcall(function() remote:FireServer(seedName) end)
         pcall(function() remote:FireServer(seedName, 1) end)
     end
@@ -552,15 +517,10 @@ local function replayLearnedMoney(amount)
         local remote = lr.remote
         if not remote or not remote.Parent then continue end
         pcall(function() remote:FireServer(amount) end)
-        pcall(function() remote:FireServer({amount = amount}) end)
-        -- Try with original args but replace numbers with amount
+        pcall(function() remote:FireServer({amount=amount}) end)
         local newArgs = {}
         for _, a in ipairs(lr.args) do
-            if type(a) == "number" then
-                table.insert(newArgs, amount)
-            else
-                table.insert(newArgs, a)
-            end
+            table.insert(newArgs, type(a) == "number" and amount or a)
         end
         if #newArgs > 0 then
             pcall(function() remote:FireServer(table.unpack(newArgs)) end)
@@ -570,12 +530,9 @@ end
 
 local function giveMoney(amount)
     ensureReplicas()
-    -- Try learned remotes first (most reliable)
     replayLearnedMoney(amount)
-    -- Then try replica approaches
     replicaWriteMoney(amount)
     replicaSetMoneyDirect(amount)
-    -- Packet remote
     if PacketRemote then
         local acts = {"AddMoney","GiveMoney","SetMoney","AddCoins","GiveCoins",
                       "SetCoins","AddCash","GiveCash","AddGold","SetBalance"}
@@ -584,7 +541,6 @@ local function giveMoney(amount)
             pcall(function() PacketRemote:FireServer({action=act, amount=amount}) end)
         end
     end
-    -- Try any remote in RS that sounds like money
     for _, d in ipairs(RS:GetDescendants()) do
         if d:IsA("RemoteEvent") and strContainsAny(d.Name, MONEY_KW) then
             pcall(function() d:FireServer(amount) end)
@@ -595,12 +551,9 @@ end
 
 local function claimSeed(seedName)
     ensureReplicas()
-    -- Try learned remotes first (most reliable)
     replayLearnedSeed(seedName)
-    -- ReplicaService approaches
     replicaWriteSeed(seedName)
     replicaInsertSeed(seedName)
-    -- Packet remote
     if PacketRemote then
         local acts = {"BuySeed","AddSeed","GiveSeed","ClaimSeed","BuyItem",
                       "AddItem","GiveItem","Buy","Purchase","PurchaseSeed","AcquireSeed"}
@@ -610,7 +563,6 @@ local function claimSeed(seedName)
             pcall(function() PacketRemote:FireServer({action=act, item=seedName}) end)
         end
     end
-    -- Try any remote in RS that sounds like buying/seeds
     for _, d in ipairs(RS:GetDescendants()) do
         if d:IsA("RemoteEvent") and strContainsAny(d.Name, SEED_KW) then
             pcall(function() d:FireServer(seedName) end)
@@ -618,7 +570,6 @@ local function claimSeed(seedName)
             pcall(function() d:FireServer({name=seedName, amount=1}) end)
         end
     end
-    -- ProximityPrompt fallback
     local snL = seedName:lower()
     for _, obj in ipairs(workspace:GetDescendants()) do
         if obj:IsA("ProximityPrompt") then
@@ -644,32 +595,23 @@ local function scanRemoteNames()
         end
     end
     table.sort(names)
-    local replicaCount, learnedS, learnedM = 0, #learnedSeedRemotes, #learnedMoneyRemotes
+    local replicaCount = 0
     for _ in pairs(capturedReplicas) do replicaCount = replicaCount + 1 end
     local charmKeys = 0
     for _ in pairs(lastCharmState) do charmKeys = charmKeys + 1 end
     table.insert(names, "")
     table.insert(names, "──── Status ────")
-    table.insert(names, "Replicas captured: " .. replicaCount)
-    table.insert(names, "Packet remote:  " .. (PacketRemote and PacketRemote:GetFullName() or "NOT FOUND"))
-    table.insert(names, "SyncState:      " .. (SyncState    and "found" or "NOT FOUND"))
-    table.insert(names, "Charm keys:     " .. charmKeys)
-    table.insert(names, "Learned seed remotes:  " .. learnedS)
-    table.insert(names, "Learned money remotes: " .. learnedM)
-    if learnedS > 0 then
-        for _, lr in ipairs(learnedSeedRemotes) do
-            table.insert(names, "  >> SEED: " .. lr.name)
-        end
-    end
-    if learnedM > 0 then
-        for _, lr in ipairs(learnedMoneyRemotes) do
-            table.insert(names, "  >> MONEY: " .. lr.name)
-        end
-    end
+    table.insert(names, "Replicas: " .. replicaCount)
+    table.insert(names, "Packet: "   .. (PacketRemote and PacketRemote:GetFullName() or "NOT FOUND"))
+    table.insert(names, "SyncState: " .. (SyncState and "found" or "NOT FOUND"))
+    table.insert(names, "Charm keys: " .. charmKeys)
+    table.insert(names, "Learned seed:  " .. #learnedSeedRemotes)
+    table.insert(names, "Learned money: " .. #learnedMoneyRemotes)
+    for _, lr in ipairs(learnedSeedRemotes)  do table.insert(names, "  >> SEED: "  .. lr.name) end
+    for _, lr in ipairs(learnedMoneyRemotes) do table.insert(names, "  >> MONEY: " .. lr.name) end
     return names
 end
 
--- ── GUI ───────────────────────────────────────────────────────────────────
 local old = player.PlayerGui:FindFirstChild("GardenDevMenu")
 if old then old:Destroy() end
 
@@ -710,7 +652,6 @@ Panel.ZIndex            = 5
 corner(Panel, 14)
 stroke(Panel, T.Green, 1.5)
 
--- Header
 local Header = Instance.new("Frame", Panel)
 Header.Size             = UDim2.new(1, 0, 0, 48)
 Header.BackgroundColor3 = T.Green
@@ -751,7 +692,6 @@ corner(CloseBtn, 6)
 CloseBtn.MouseEnter:Connect(function() tw(CloseBtn, {BackgroundColor3 = T.RedHover}, 0.1) end)
 CloseBtn.MouseLeave:Connect(function() tw(CloseBtn, {BackgroundColor3 = T.Red},      0.1) end)
 
--- Tab bar
 local TabBar = Instance.new("Frame", Panel)
 TabBar.Size             = UDim2.new(1, -16, 0, 34)
 TabBar.Position         = UDim2.new(0, 8, 0, 56)
@@ -779,7 +719,6 @@ end
 local CropsTab = makeTab("🌾  Crops", 0)
 local SeedsTab = makeTab("🌱  Seeds", 0.5)
 
--- ── Crops content ─────────────────────────────────────────────────────────
 local CropsContent = Instance.new("Frame", Panel)
 CropsContent.Size                   = UDim2.new(1, 0, 0, PH - 98)
 CropsContent.Position               = UDim2.new(0, 0, 0, 98)
@@ -843,9 +782,9 @@ local function makeCropBtn(text, color, yAbs)
     return btn
 end
 
-local CollectAllBtn = makeCropBtn("🍎  Collect All",  T.Green, 366)
-local AutoBtn       = makeCropBtn("⚡  Auto: OFF",     T.Card,  408)
-local RefreshBtn    = makeCropBtn("🔄  Refresh List",  T.Blue,  450)
+local CollectAllBtn = makeCropBtn("🍎  Collect All", T.Green, 366)
+local AutoBtn       = makeCropBtn("⚡  Auto: OFF",    T.Card,  408)
+local RefreshBtn    = makeCropBtn("🔄  Refresh List", T.Blue,  450)
 
 for _, info in ipairs({{CollectAllBtn, T.Green}, {RefreshBtn, T.Blue}}) do
     local btn, clr = info[1], info[2]
@@ -857,7 +796,6 @@ local autoBaseColor = T.Card
 AutoBtn.MouseEnter:Connect(function() tw(AutoBtn, {BackgroundColor3 = autoBaseColor:Lerp(T.White, 0.13)}, 0.12) end)
 AutoBtn.MouseLeave:Connect(function() tw(AutoBtn, {BackgroundColor3 = autoBaseColor}, 0.12) end)
 
--- ── Seeds content ─────────────────────────────────────────────────────────
 local SeedsContent = Instance.new("Frame", Panel)
 SeedsContent.Size                   = UDim2.new(1, 0, 0, PH - 98)
 SeedsContent.Position               = UDim2.new(0, 0, 0, 98)
@@ -903,29 +841,26 @@ local function makeSeedBtn(text, color, yAbs, textColor)
     return btn
 end
 
--- Buttons: y starts at 204 (after scroll), spacing 42
-local ScanRemotesBtn   = makeSeedBtn("🔎  Scan Remotes",            T.Blue,    204)
-local SpyBtn           = makeSeedBtn("👁  Spy: OFF",                T.Purple,  246)
-local LearnStatusBtn   = makeSeedBtn("📡  Learned: 0 remotes",      T.Card,    288)
-local GiveMoneyBtn     = makeSeedBtn("💰  Give $100,000",           T.Gold,    330, T.DarkText)
-local Give10MBtn       = makeSeedBtn("💎  Give $10,000,000",        T.Gold,    372, T.DarkText)
-local ClaimAllSeedsBtn = makeSeedBtn("🌱  Claim All Seeds",         T.Green,   414)
-local ClearLearnedBtn  = makeSeedBtn("🗑  Clear Learned Remotes",   T.Red,     456)
+local ScanRemotesBtn   = makeSeedBtn("🔎  Scan Remotes",          T.Blue,    204)
+local SpyBtn           = makeSeedBtn("👁  Spy: OFF",              T.Purple,  246)
+local LearnStatusBtn   = makeSeedBtn("📡  Learned: 0 remotes",    T.Card,    288)
+local GiveMoneyBtn     = makeSeedBtn("💰  Give $100,000",         T.Gold,    330, T.DarkText)
+local Give10MBtn       = makeSeedBtn("💎  Give $10,000,000",      T.Gold,    372, T.DarkText)
+local ClaimAllSeedsBtn = makeSeedBtn("🌱  Claim All Seeds",       T.Green,   414)
+local ClearLearnedBtn  = makeSeedBtn("🗑  Clear Learned Remotes", T.Red,     456)
 
--- Hover effects
 local function seedHover(btn, onClr, offClr)
-    btn.MouseEnter:Connect(function() tw(btn, {BackgroundColor3 = onClr}, 0.12) end)
+    btn.MouseEnter:Connect(function() tw(btn, {BackgroundColor3 = onClr},  0.12) end)
     btn.MouseLeave:Connect(function() tw(btn, {BackgroundColor3 = offClr}, 0.12) end)
 end
-seedHover(ScanRemotesBtn,   T.Blue:Lerp(T.White,0.2),     T.Blue)
-seedHover(SpyBtn,           T.Purple:Lerp(T.White,0.2),   T.Purple)
-seedHover(LearnStatusBtn,   T.CardHover,                  T.Card)
-seedHover(GiveMoneyBtn,     T.Gold:Lerp(T.White,0.2),     T.Gold)
-seedHover(Give10MBtn,       T.Gold:Lerp(T.White,0.2),     T.Gold)
-seedHover(ClaimAllSeedsBtn, T.DarkGreen,                  T.Green)
-seedHover(ClearLearnedBtn,  T.RedHover,                   T.Red)
+seedHover(ScanRemotesBtn,   T.Blue:Lerp(T.White,0.2),   T.Blue)
+seedHover(SpyBtn,           T.Purple:Lerp(T.White,0.2), T.Purple)
+seedHover(LearnStatusBtn,   T.CardHover,                T.Card)
+seedHover(GiveMoneyBtn,     T.Gold:Lerp(T.White,0.2),   T.Gold)
+seedHover(Give10MBtn,       T.Gold:Lerp(T.White,0.2),   T.Gold)
+seedHover(ClaimAllSeedsBtn, T.DarkGreen,                T.Green)
+seedHover(ClearLearnedBtn,  T.RedHover,                 T.Red)
 
--- Update learned status button
 local function refreshLearnedBtn()
     local total = #learnedSeedRemotes + #learnedMoneyRemotes
     if total > 0 then
@@ -946,7 +881,6 @@ ClearLearnedBtn.MouseButton1Click:Connect(function()
     refreshLearnedBtn()
 end)
 
--- ── Scan overlay ──────────────────────────────────────────────────────────
 local ScanOverlay = Instance.new("Frame", Panel)
 ScanOverlay.Size             = UDim2.new(1, -16, 0, PH - 106)
 ScanOverlay.Position         = UDim2.new(0, 8, 0, 98)
@@ -1030,7 +964,6 @@ local function populateScanOverlay(lines, title, color)
     ScanOverlay.Visible = true
 end
 
--- ── Scan button ───────────────────────────────────────────────────────────
 ScanRemotesBtn.MouseButton1Click:Connect(function()
     local names = scanRemoteNames()
     local rc = 0
@@ -1045,7 +978,6 @@ ScanRemotesBtn.MouseButton1Click:Connect(function()
         T.Blue)
 end)
 
--- ── Spy button ────────────────────────────────────────────────────────────
 local spyThread = nil
 SpyBtn.MouseButton1Click:Connect(function()
     spyActive = not spyActive
@@ -1053,9 +985,7 @@ SpyBtn.MouseButton1Click:Connect(function()
         spyLogs = {}
         SpyBtn.Text = "👁  Spy: ON"
         tw(SpyBtn, {BackgroundColor3 = T.PurpleOn}, 0.15)
-        populateScanOverlay({},
-            "Spy ON — buy a seed or earn money in-game...",
-            T.PurpleOn)
+        populateScanOverlay({}, "Spy ON — buy a seed or earn money in-game...", T.PurpleOn)
         spyThread = task.spawn(function()
             while spyActive do
                 task.wait(2)
@@ -1083,7 +1013,6 @@ SpyBtn.MouseButton1Click:Connect(function()
     end
 end)
 
--- ── Seed cards ────────────────────────────────────────────────────────────
 for i, seed in ipairs(SEEDS) do
     local rc = RARITY_COLOR[seed.rarity] or T.Green
 
@@ -1166,7 +1095,6 @@ for i, seed in ipairs(SEEDS) do
     end)
 end
 
--- ── Claim All Seeds ───────────────────────────────────────────────────────
 local isClaimingAll = false
 ClaimAllSeedsBtn.MouseButton1Click:Connect(function()
     if isClaimingAll then return end
@@ -1186,7 +1114,6 @@ ClaimAllSeedsBtn.MouseButton1Click:Connect(function()
     end)
 end)
 
--- ── Money buttons ─────────────────────────────────────────────────────────
 local moneyBusy = false
 local function doGiveMoney(btn, amount, label)
     if moneyBusy then return end
@@ -1210,7 +1137,6 @@ Give10MBtn.MouseButton1Click:Connect(function()
     doGiveMoney(Give10MBtn, 10000000, "💎  Give $10,000,000")
 end)
 
--- ── Tab switching ─────────────────────────────────────────────────────────
 local function setTab(tab)
     if tab == "crops" then
         CropsContent.Visible = true
@@ -1228,7 +1154,6 @@ end
 CropsTab.MouseButton1Click:Connect(function() setTab("crops") end)
 SeedsTab.MouseButton1Click:Connect(function() setTab("seeds") end)
 
--- ── Crop cards ────────────────────────────────────────────────────────────
 local function makeCropCard(entry, idx)
     local obj  = entry.obj
     local pos  = getPos(obj)
@@ -1308,7 +1233,6 @@ local function makeCropCard(entry, idx)
     end)
 end
 
--- ── Crop functionality ────────────────────────────────────────────────────
 local foundCrops   = {}
 local autoOn       = false
 local autoThread   = nil
@@ -1418,7 +1342,6 @@ AutoBtn.MouseButton1Click:Connect(function()
     end
 end)
 
--- ── Panel toggle ──────────────────────────────────────────────────────────
 local isOpen = false
 
 local function openPanel()
