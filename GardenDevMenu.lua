@@ -4,6 +4,8 @@ local UserInputService       = game:GetService("UserInputService")
 local ProximityPromptService = game:GetService("ProximityPromptService")
 local RS                     = game:GetService("ReplicatedStorage")
 
+local unpack_ = table.unpack or unpack
+
 local player    = Players.LocalPlayer
 local character = player.Character
 local rootPart  = nil
@@ -113,7 +115,11 @@ end
 local function getPos(obj)
     if not obj or not obj.Parent then return nil end
     local ok, r = pcall(function()
-        if obj:IsA("Model")    then return obj:GetModelCFrame().Position end
+        if obj:IsA("Model") then
+            if obj.PrimaryPart then return obj.PrimaryPart.Position end
+            local cf = obj:GetBoundingBox()
+            return cf.Position
+        end
         if obj:IsA("BasePart") then return obj.Position end
     end)
     return ok and r or nil
@@ -357,7 +363,8 @@ local function hookSpy()
 
     local ok1 = pcall(function()
         if not hookmetamethod then error("no hookmetamethod") end
-        local old; old = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
+        local oldNc = nil
+        oldNc = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
             local method = getnamecallmethod and getnamecallmethod() or ""
             if method == "FireServer" or method == "InvokeServer" then
                 pcall(function()
@@ -366,7 +373,7 @@ local function hookSpy()
                     end
                 end)
             end
-            return old(self, ...)
+            if oldNc then return oldNc(self, ...) end
         end))
     end)
 
@@ -374,7 +381,7 @@ local function hookSpy()
         pcall(function()
             local mt = getrawmetatable(game)
             if not mt or not mt.__namecall then error("no mt") end
-            local old = mt.__namecall
+            local oldNc2 = mt.__namecall
             setreadonly(mt, false)
             local fn = function(self, ...)
                 local method = getnamecallmethod and getnamecallmethod() or ""
@@ -385,7 +392,7 @@ local function hookSpy()
                         end
                     end)
                 end
-                return old(self, ...)
+                if oldNc2 then return oldNc2(self, ...) end
             end
             mt.__namecall = newcclosure and newcclosure(fn) or fn
             setreadonly(mt, true)
@@ -394,17 +401,21 @@ local function hookSpy()
 
     pcall(function()
         if not hookfunction then return end
-        local dummy = Instance.new("RemoteEvent")
-        local origFire   = dummy.FireServer
-        local origInvoke = dummy.InvokeServer
-        dummy:Destroy()
-        hookfunction(origFire, function(self, ...)
+        local dRE = Instance.new("RemoteEvent")
+        local dRF = Instance.new("RemoteFunction")
+        local rawFire   = dRE.FireServer
+        local rawInvoke = dRF.InvokeServer
+        dRE:Destroy()
+        dRF:Destroy()
+        local realFire
+        realFire = hookfunction(rawFire, function(self, ...)
             pcall(logCall, self, ...)
-            return origFire(self, ...)
+            if realFire then return realFire(self, ...) end
         end)
-        hookfunction(origInvoke, function(self, ...)
+        local realInvoke
+        realInvoke = hookfunction(rawInvoke, function(self, ...)
             pcall(logCall, self, ...)
-            return origInvoke(self, ...)
+            if realInvoke then return realInvoke(self, ...) end
         end)
     end)
 end
@@ -506,7 +517,7 @@ local function replayLearnedSeed(seedName)
                 table.insert(newArgs, a)
             end
         end
-        pcall(function() remote:FireServer(table.unpack(newArgs)) end)
+        pcall(function() remote:FireServer(unpack_(newArgs)) end)
         pcall(function() remote:FireServer(seedName) end)
         pcall(function() remote:FireServer(seedName, 1) end)
     end
@@ -524,7 +535,7 @@ local function replayLearnedMoney(amount)
             table.insert(newArgs, type(a) == "number" and amount or a)
         end
         if #newArgs > 0 then
-            pcall(function() remote:FireServer(table.unpack(newArgs)) end)
+            pcall(function() remote:FireServer(unpack_(newArgs)) end)
         end
     end
 end
