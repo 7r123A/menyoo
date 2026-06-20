@@ -80,27 +80,61 @@ local function triggerPP(pp)
     end)
 end
 
+local function isCropPrompt(at)
+    return at:find("harvest") or at:find("collect") or at:find("pick")
+        or at:find("gather") or at:find("claim")    or at:find("take")
+end
+
+local function scanContainer(container, results, seen)
+    for _, obj in ipairs(container:GetDescendants()) do
+        if obj:IsA("ProximityPrompt") and isCropPrompt(obj.ActionText:lower()) then
+            local target = obj.Parent
+            if not target then continue end
+            if target:IsA("BasePart") and target.Parent
+               and (target.Parent:IsA("Model") or target.Parent:IsA("Folder")) then
+                target = target.Parent
+            end
+            if not seen[target] then
+                seen[target] = true
+                local dn = (obj.ObjectText ~= "" and obj.ObjectText) or target.Name
+                table.insert(results, {obj=target, name=dn, pp=obj})
+            end
+        end
+    end
+end
+
 local function findAllCrops()
     local results, seen = {}, {}
-    for _, obj in ipairs(workspace:GetDescendants()) do
-        if obj:IsA("ProximityPrompt") then
-            local at = obj.ActionText:lower()
-            if at:find("harvest") or at:find("collect") or at:find("pick")
-               or at:find("gather") or at:find("claim") or at:find("take") then
-                local target = obj.Parent
-                if not target then continue end
-                if target:IsA("BasePart") and target.Parent
-                   and (target.Parent:IsA("Model") or target.Parent:IsA("Folder")) then
-                    target = target.Parent
-                end
-                if not seen[target] then
-                    seen[target] = true
-                    local dn = (obj.ObjectText ~= "" and obj.ObjectText) or target.Name
-                    table.insert(results, {obj=target, name=dn, pp=obj})
+    local pname = player.Name
+    local uid   = tostring(player.UserId)
+
+    -- Search player's own farm folder first (fast path)
+    local farmRoots = {
+        "Plots", "Gardens", "Farm", "Farms", "PlayerPlots",
+        "Garden", "PlayerFarms", "PlotStorage"
+    }
+    for _, fname in ipairs(farmRoots) do
+        local folder = workspace:FindFirstChild(fname)
+        if folder then
+            local mine = folder:FindFirstChild(pname) or folder:FindFirstChild(uid)
+            if mine then
+                scanContainer(mine, results, seen)
+            else
+                -- Some games put plots flat inside the folder
+                for _, child in ipairs(folder:GetChildren()) do
+                    if child.Name:lower():find(pname:lower()) or child.Name == uid then
+                        scanContainer(child, results, seen)
+                    end
                 end
             end
         end
     end
+
+    -- Fallback: full workspace scan (catches games with non-standard structure)
+    if #results == 0 then
+        scanContainer(workspace, results, seen)
+    end
+
     return results
 end
 
