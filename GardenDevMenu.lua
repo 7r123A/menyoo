@@ -407,16 +407,26 @@ local function hookSpy()
         local rawInvoke = dRF.InvokeServer
         dRE:Destroy()
         dRF:Destroy()
-        local realFire
-        realFire = hookfunction(rawFire, function(self, ...)
-            pcall(logCall, self, ...)
-            if realFire then return realFire(self, ...) end
-        end)
-        local realInvoke
-        realInvoke = hookfunction(rawInvoke, function(self, ...)
-            pcall(logCall, self, ...)
-            if realInvoke then return realInvoke(self, ...) end
-        end)
+        if rawFire then
+            local realFire
+            local fireFn = function(self, ...)
+                pcall(logCall, self, ...)
+                if realFire then return realFire(self, ...) end
+            end
+            if newcclosure then fireFn = newcclosure(fireFn) end
+            local ok, ret = pcall(hookfunction, rawFire, fireFn)
+            if ok and ret then realFire = ret end
+        end
+        if rawInvoke then
+            local realInvoke
+            local invFn = function(self, ...)
+                pcall(logCall, self, ...)
+                if realInvoke then return realInvoke(self, ...) end
+            end
+            if newcclosure then invFn = newcclosure(invFn) end
+            local ok2, ret2 = pcall(hookfunction, rawInvoke, invFn)
+            if ok2 and ret2 then realInvoke = ret2 end
+        end
     end)
 end
 
@@ -624,6 +634,130 @@ local function scanRemoteNames()
     return names
 end
 
+local speedOn  = false
+local speedVal = 50
+local function applySpeed(v)
+    pcall(function()
+        local hum = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+        if hum then hum.WalkSpeed = v end
+    end)
+end
+player.CharacterAdded:Connect(function(c)
+    if not speedOn then return end
+    task.wait(0.5)
+    local hum = c:FindFirstChildOfClass("Humanoid")
+    if hum then hum.WalkSpeed = speedVal end
+end)
+
+local afkOn     = false
+local afkThread = nil
+local function startAntiAfk()
+    afkThread = task.spawn(function()
+        while afkOn do
+            task.wait(55)
+            if not afkOn then break end
+            pcall(function()
+                local hum = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+                if hum then hum:ChangeState(Enum.HumanoidStateType.Jumping) end
+            end)
+        end
+    end)
+end
+
+local noclipOn = false
+game:GetService("RunService").Stepped:Connect(function()
+    if not noclipOn or not player.Character then return end
+    for _, p in ipairs(player.Character:GetDescendants()) do
+        if p:IsA("BasePart") then p.CanCollide = false end
+    end
+end)
+
+local flyOn   = false
+local flyBV, flyBG, flyConn
+local function stopFly()
+    flyOn = false
+    if flyBV  then flyBV:Destroy();  flyBV  = nil end
+    if flyBG  then flyBG:Destroy();  flyBG  = nil end
+    if flyConn then flyConn:Disconnect(); flyConn = nil end
+    pcall(function()
+        local hum = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+        if hum then hum:ChangeState(Enum.HumanoidStateType.GettingUp) end
+    end)
+end
+local function startFly()
+    local hrp = rootPart
+    if not hrp then
+        pcall(function()
+            hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+        end)
+    end
+    if not hrp then return end
+    flyBV = Instance.new("BodyVelocity")
+    flyBV.Velocity  = Vector3.new(0,0,0)
+    flyBV.MaxForce  = Vector3.new(1e9,1e9,1e9)
+    flyBV.Parent    = hrp
+    flyBG = Instance.new("BodyGyro")
+    flyBG.MaxTorque = Vector3.new(1e9,1e9,1e9)
+    flyBG.P         = 1e9
+    flyBG.Parent    = hrp
+    flyConn = game:GetService("RunService").Heartbeat:Connect(function()
+        if not flyOn then stopFly(); return end
+        local cam = workspace.CurrentCamera
+        local spd = 55
+        local vx, vy, vz = 0, 0, 0
+        local lv = cam.CFrame.LookVector
+        local rv = cam.CFrame.RightVector
+        if UserInputService:IsKeyDown(Enum.KeyCode.W) then
+            vx = vx + lv.X * spd; vy = vy + lv.Y * spd; vz = vz + lv.Z * spd
+        end
+        if UserInputService:IsKeyDown(Enum.KeyCode.S) then
+            vx = vx - lv.X * spd; vy = vy - lv.Y * spd; vz = vz - lv.Z * spd
+        end
+        if UserInputService:IsKeyDown(Enum.KeyCode.A) then
+            vx = vx - rv.X * spd; vy = vy - rv.Y * spd; vz = vz - rv.Z * spd
+        end
+        if UserInputService:IsKeyDown(Enum.KeyCode.D) then
+            vx = vx + rv.X * spd; vy = vy + rv.Y * spd; vz = vz + rv.Z * spd
+        end
+        if UserInputService:IsKeyDown(Enum.KeyCode.Space)       then vy = vy + spd end
+        if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then vy = vy - spd end
+        if flyBV then flyBV.Velocity = Vector3.new(vx, vy, vz) end
+        if flyBG then flyBG.CFrame   = cam.CFrame end
+    end)
+end
+
+local function teleportToShop()
+    local kw = {"shop","store","merchant","vendor","market","seed"}
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if obj:IsA("ProximityPrompt") then
+            local at = obj.ActionText:lower()
+            for _, k in ipairs(kw) do
+                if at:find(k, 1, true) then
+                    local p = getPos(obj.Parent)
+                    if p and rootPart then
+                        rootPart.CFrame = CFrame.new(p + Vector3.new(0, 6, 0))
+                        return true
+                    end
+                end
+            end
+        end
+    end
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if (obj:IsA("Model") or obj:IsA("BasePart")) then
+            for _, k in ipairs(kw) do
+                if obj.Name:lower():find(k, 1, true) then
+                    local p = getPos(obj)
+                    if p and rootPart then
+                        rootPart.CFrame = CFrame.new(p + Vector3.new(0, 6, 0))
+                        return true
+                    end
+                end
+            end
+        end
+    end
+    return false
+end
+
 local old = player.PlayerGui:FindFirstChild("GardenDevMenu")
 if old then old:Destroy() end
 
@@ -650,12 +784,12 @@ stroke(ToggleBtn, T.Green, 1.5)
 ToggleBtn.MouseEnter:Connect(function() tw(ToggleBtn, {BackgroundColor3 = T.Card}, 0.1) end)
 ToggleBtn.MouseLeave:Connect(function() tw(ToggleBtn, {BackgroundColor3 = T.Bg},   0.1) end)
 
-local PH, PW = 590, 320
+local PH, PW = 720, 320
 
 local Panel = Instance.new("Frame", Gui)
 Panel.Name              = "Panel"
 Panel.Size              = UDim2.new(0, 0, 0, PH)
-Panel.Position          = UDim2.new(0, 138, 0.5, -PH / 2)
+Panel.Position          = UDim2.new(0.5, -PW / 2, 0.5, -PH / 2)
 Panel.BackgroundColor3  = T.Bg
 Panel.BorderSizePixel   = 0
 Panel.ClipsDescendants  = true
@@ -703,6 +837,36 @@ CloseBtn.ZIndex           = 8
 corner(CloseBtn, 6)
 CloseBtn.MouseEnter:Connect(function() tw(CloseBtn, {BackgroundColor3 = T.RedHover}, 0.1) end)
 CloseBtn.MouseLeave:Connect(function() tw(CloseBtn, {BackgroundColor3 = T.Red},      0.1) end)
+
+do
+    local dragging = false
+    local dragStart = Vector3.new(0, 0, 0)
+    local startPos  = UDim2.new(0, 0, 0, 0)
+    Header.InputBegan:Connect(function(inp)
+        if inp.UserInputType == Enum.UserInputType.MouseButton1 or
+           inp.UserInputType == Enum.UserInputType.Touch then
+            dragging  = true
+            dragStart = inp.Position
+            startPos  = Panel.Position
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(inp)
+        if not dragging then return end
+        if inp.UserInputType ~= Enum.UserInputType.MouseMovement and
+           inp.UserInputType ~= Enum.UserInputType.Touch then return end
+        local delta = inp.Position - dragStart
+        Panel.Position = UDim2.new(
+            startPos.X.Scale, startPos.X.Offset + delta.X,
+            startPos.Y.Scale, startPos.Y.Offset + delta.Y
+        )
+    end)
+    UserInputService.InputEnded:Connect(function(inp)
+        if inp.UserInputType == Enum.UserInputType.MouseButton1 or
+           inp.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+end
 
 local TabBar = Instance.new("Frame", Panel)
 TabBar.Size             = UDim2.new(1, -16, 0, 34)
@@ -794,9 +958,14 @@ local function makeCropBtn(text, color, yAbs)
     return btn
 end
 
-local CollectAllBtn = makeCropBtn("🍎  Collect All", T.Green, 366)
-local AutoBtn       = makeCropBtn("⚡  Auto: OFF",    T.Card,  408)
-local RefreshBtn    = makeCropBtn("🔄  Refresh List", T.Blue,  450)
+local CollectAllBtn = makeCropBtn("🍎  Collect All",   T.Green,                      366)
+local AutoBtn       = makeCropBtn("⚡  Auto: OFF",      T.Card,                       408)
+local RefreshBtn    = makeCropBtn("🔄  Refresh List",   T.Blue,                       450)
+local SpeedBtn      = makeCropBtn("🏃  Speed: OFF",     Color3.fromRGB(100, 60, 180), 492)
+local AntiAfkBtn    = makeCropBtn("💤  Anti-AFK: OFF",  Color3.fromRGB(60, 130, 180), 534)
+local NoclipBtn     = makeCropBtn("👻  NoClip: OFF",    Color3.fromRGB(120, 90, 30),  576)
+local FlyBtn        = makeCropBtn("🦋  Fly: OFF",       Color3.fromRGB(60, 90, 180),  618)
+local TpShopBtn     = makeCropBtn("🏪  Teleport → Shop", T.Blue,                     660)
 
 for _, info in ipairs({{CollectAllBtn, T.Green}, {RefreshBtn, T.Blue}}) do
     local btn, clr = info[1], info[2]
@@ -1321,21 +1490,22 @@ local function startAutoLoop()
             if #foundCrops == 0 then
                 foundCrops    = findAllCrops()
                 StatsLbl.Text = string.format("✅ %d crops found", #foundCrops)
-                if #foundCrops == 0 then task.wait(3); continue end
-            end
-            local snapshot = {}
-            for i = 1, #foundCrops do snapshot[i] = foundCrops[i] end
-            for _, entry in ipairs(snapshot) do
-                if not autoOn then break end
-                if entry.obj and entry.obj.Parent then
-                    collectOne(entry)
+                if #foundCrops == 0 then task.wait(3) end
+            else
+                local snapshot = {}
+                for i = 1, #foundCrops do snapshot[i] = foundCrops[i] end
+                for _, entry in ipairs(snapshot) do
+                    if not autoOn then break end
+                    if entry.obj and entry.obj.Parent then
+                        collectOne(entry)
+                    end
+                    task.wait(0.4)
                 end
-                task.wait(0.4)
-            end
-            if autoOn then
-                task.wait(1)
-                foundCrops    = findAllCrops()
-                StatsLbl.Text = string.format("✅ %d crops found", #foundCrops)
+                if autoOn then
+                    task.wait(1)
+                    foundCrops    = findAllCrops()
+                    StatsLbl.Text = string.format("✅ %d crops found", #foundCrops)
+                end
             end
         end
     end)
@@ -1352,6 +1522,67 @@ AutoBtn.MouseButton1Click:Connect(function()
         task.cancel(autoThread)
         autoThread = nil
     end
+end)
+
+SpeedBtn.MouseButton1Click:Connect(function()
+    speedOn = not speedOn
+    if speedOn then
+        SpeedBtn.Text = "🏃  Speed: ON (50)"
+        tw(SpeedBtn, {BackgroundColor3 = Color3.fromRGB(140, 80, 220)}, 0.15)
+        applySpeed(50)
+    else
+        SpeedBtn.Text = "🏃  Speed: OFF"
+        tw(SpeedBtn, {BackgroundColor3 = Color3.fromRGB(100, 60, 180)}, 0.15)
+        applySpeed(16)
+    end
+end)
+
+AntiAfkBtn.MouseButton1Click:Connect(function()
+    afkOn = not afkOn
+    if afkOn then
+        AntiAfkBtn.Text = "💤  Anti-AFK: ON"
+        tw(AntiAfkBtn, {BackgroundColor3 = Color3.fromRGB(40, 160, 220)}, 0.15)
+        startAntiAfk()
+    else
+        AntiAfkBtn.Text = "💤  Anti-AFK: OFF"
+        tw(AntiAfkBtn, {BackgroundColor3 = Color3.fromRGB(60, 130, 180)}, 0.15)
+        if afkThread then task.cancel(afkThread); afkThread = nil end
+    end
+end)
+
+NoclipBtn.MouseButton1Click:Connect(function()
+    noclipOn = not noclipOn
+    if noclipOn then
+        NoclipBtn.Text = "👻  NoClip: ON"
+        tw(NoclipBtn, {BackgroundColor3 = Color3.fromRGB(180, 140, 40)}, 0.15)
+    else
+        NoclipBtn.Text = "👻  NoClip: OFF"
+        tw(NoclipBtn, {BackgroundColor3 = Color3.fromRGB(120, 90, 30)}, 0.15)
+    end
+end)
+
+FlyBtn.MouseButton1Click:Connect(function()
+    flyOn = not flyOn
+    if flyOn then
+        FlyBtn.Text = "🦋  Fly: ON  (WASD+Space/Ctrl)"
+        tw(FlyBtn, {BackgroundColor3 = Color3.fromRGB(80, 120, 230)}, 0.15)
+        startFly()
+    else
+        FlyBtn.Text = "🦋  Fly: OFF"
+        tw(FlyBtn, {BackgroundColor3 = Color3.fromRGB(60, 90, 180)}, 0.15)
+        stopFly()
+    end
+end)
+
+TpShopBtn.MouseButton1Click:Connect(function()
+    TpShopBtn.Text = "⏳  Searching..."
+    task.spawn(function()
+        local ok = teleportToShop()
+        task.wait(0.5)
+        TpShopBtn.Text = ok and "✅  Teleported!" or "❌  Shop not found"
+        task.wait(2)
+        TpShopBtn.Text = "🏪  Teleport → Shop"
+    end)
 end)
 
 local isOpen = false
