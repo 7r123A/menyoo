@@ -230,35 +230,28 @@ local function startFly()
     end)
 end
 
-local function teleportToShop()
-    local kw = {"shop","store","merchant","vendor","market","buy","sell","trader","npc","pete","paul"}
-    local function matchesKw(s)
+local function teleportToNPC(names)
+    local lower = {}
+    for i, n in ipairs(names) do lower[i] = n:lower() end
+    local function hit(s)
         s = s:lower()
-        for _, k in ipairs(kw) do
-            if s:find(k, 1, true) then return true end
+        for _, n in ipairs(lower) do
+            if s:find(n, 1, true) then return true end
         end
         return false
     end
-    -- 1. Check ProximityPrompts whose ActionText or ObjectText matches
+    -- Priority: ProximityPrompt ObjectText (most specific)
     for _, obj in ipairs(workspace:GetDescendants()) do
-        if obj:IsA("ProximityPrompt") then
-            if matchesKw(obj.ActionText) or matchesKw(obj.ObjectText) then
-                local p = getPos(obj.Parent)
-                if p and rootPart then
-                    rootPart.CFrame = CFrame.new(p + Vector3.new(0, 6, 0))
-                    return true
-                end
-            end
+        if obj:IsA("ProximityPrompt") and (hit(obj.ObjectText) or hit(obj.ActionText)) then
+            local p = getPos(obj.Parent)
+            if p and rootPart then rootPart.CFrame = CFrame.new(p + Vector3.new(0, 6, 0)); return true end
         end
     end
-    -- 2. Check object names in workspace
+    -- Fallback: Model / Part name
     for _, obj in ipairs(workspace:GetDescendants()) do
-        if (obj:IsA("Model") or obj:IsA("BasePart") or obj:IsA("NPC")) and matchesKw(obj.Name) then
+        if (obj:IsA("Model") or obj:IsA("BasePart")) and hit(obj.Name) then
             local p = getPos(obj)
-            if p and rootPart then
-                rootPart.CFrame = CFrame.new(p + Vector3.new(0, 6, 0))
-                return true
-            end
+            if p and rootPart then rootPart.CFrame = CFrame.new(p + Vector3.new(0, 6, 0)); return true end
         end
     end
     return false
@@ -488,25 +481,39 @@ ToolsContent.Visible                = false
 
 local function makeToolBtn(text, color, yAbs)
     local btn = Instance.new("TextButton", ToolsContent)
-    btn.Size             = UDim2.new(1, -16, 0, 52)
+    btn.Size             = UDim2.new(1, -16, 0, 38)
     btn.Position         = UDim2.new(0, 8, 0, yAbs)
     btn.BackgroundColor3 = color
     btn.BorderSizePixel  = 0
     btn.Text             = text
     btn.TextColor3       = T.White
     btn.Font             = Enum.Font.GothamBold
-    btn.TextSize         = 14
+    btn.TextSize         = 13
     btn.AutoButtonColor  = false
     btn.ZIndex           = 7
-    corner(btn, 10)
+    corner(btn, 9)
     return btn
 end
 
-local SpeedBtn  = makeToolBtn("🏃  Speed: OFF",       Color3.fromRGB(100, 60, 180),  10)
-local AfkBtn    = makeToolBtn("💤  Anti-AFK: OFF",    Color3.fromRGB(60, 130, 180),  72)
-local NoclipBtn = makeToolBtn("👻  NoClip: OFF",      Color3.fromRGB(120, 90, 30),   134)
-local FlyBtn    = makeToolBtn("🦋  Fly: OFF",         Color3.fromRGB(60, 90, 180),   196)
-local TpShopBtn = makeToolBtn("🏪  Teleport to Shop", T.Blue,                        258)
+local SpeedBtn  = makeToolBtn("🏃  Speed: OFF",    Color3.fromRGB(100, 60, 180),  8)
+local AfkBtn    = makeToolBtn("💤  Anti-AFK: OFF", Color3.fromRGB(60, 130, 180),  54)
+local NoclipBtn = makeToolBtn("👻  NoClip: OFF",   Color3.fromRGB(120, 90, 30),   100)
+local FlyBtn    = makeToolBtn("🦋  Fly: OFF",      Color3.fromRGB(60, 90, 180),   146)
+
+local TpSepLbl = Instance.new("TextLabel", ToolsContent)
+TpSepLbl.Size                   = UDim2.new(1, -16, 0, 18)
+TpSepLbl.Position               = UDim2.new(0, 8, 0, 196)
+TpSepLbl.BackgroundTransparency = 1
+TpSepLbl.Text                   = "── Teleport ──"
+TpSepLbl.TextColor3             = T.Sub
+TpSepLbl.Font                   = Enum.Font.Gotham
+TpSepLbl.TextSize               = 11
+TpSepLbl.ZIndex                 = 7
+
+local TpSamBtn     = makeToolBtn("🌱  Sam — Seed Shop",   Color3.fromRGB(40, 130, 60),   222)
+local TpStevenBtn  = makeToolBtn("💰  Steven — Sell",     Color3.fromRGB(160, 110, 20),  268)
+local TpRaphaelBtn = makeToolBtn("⚙️  Raphael — Gear",    Color3.fromRGB(80, 80, 160),   314)
+local TpEloiseBtn  = makeToolBtn("🐾  Eloise — Pets",     Color3.fromRGB(140, 50, 140),  360)
 
 local function setTab(tab)
     if tab == "crops" then
@@ -762,16 +769,23 @@ FlyBtn.MouseButton1Click:Connect(function()
     end
 end)
 
-TpShopBtn.MouseButton1Click:Connect(function()
-    TpShopBtn.Text = "Searching..."
-    task.spawn(function()
-        local ok = teleportToShop()
-        task.wait(0.5)
-        TpShopBtn.Text = ok and "Teleported!" or "Shop not found"
-        task.wait(2)
-        TpShopBtn.Text = "🏪  Teleport to Shop"
+local function makeTpHandler(btn, names, label)
+    btn.MouseButton1Click:Connect(function()
+        btn.Text = "Searching..."
+        task.spawn(function()
+            local ok = teleportToNPC(names)
+            task.wait(0.4)
+            btn.Text = ok and "Teleported!" or "Not found"
+            task.wait(2)
+            btn.Text = label
+        end)
     end)
-end)
+end
+
+makeTpHandler(TpSamBtn,     {"sam", "seed shop", "seeds"},          "🌱  Sam — Seed Shop")
+makeTpHandler(TpStevenBtn,  {"steven", "sell", "selling"},          "💰  Steven — Sell")
+makeTpHandler(TpRaphaelBtn, {"raphael", "gear", "tool", "shovel"},  "⚙️  Raphael — Gear")
+makeTpHandler(TpEloiseBtn,  {"eloise", "pet", "egg", "pets"},       "🐾  Eloise — Pets")
 
 local isOpen = false
 
