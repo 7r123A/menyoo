@@ -85,7 +85,8 @@ local function findAllCrops()
     for _, obj in ipairs(workspace:GetDescendants()) do
         if obj:IsA("ProximityPrompt") then
             local at = obj.ActionText:lower()
-            if at:find("harvest") or at:find("collect") or at:find("pick") then
+            if at:find("harvest") or at:find("collect") or at:find("pick")
+               or at:find("gather") or at:find("claim") or at:find("take") then
                 local target = obj.Parent
                 if not target then continue end
                 if target:IsA("BasePart") and target.Parent
@@ -196,31 +197,33 @@ local function startFly()
 end
 
 local function teleportToShop()
-    local kw = {"shop","store","merchant","vendor","market","seed"}
+    local kw = {"shop","store","merchant","vendor","market","buy","sell","trader","npc","pete","paul"}
+    local function matchesKw(s)
+        s = s:lower()
+        for _, k in ipairs(kw) do
+            if s:find(k, 1, true) then return true end
+        end
+        return false
+    end
+    -- 1. Check ProximityPrompts whose ActionText or ObjectText matches
     for _, obj in ipairs(workspace:GetDescendants()) do
         if obj:IsA("ProximityPrompt") then
-            local at = obj.ActionText:lower()
-            for _, k in ipairs(kw) do
-                if at:find(k, 1, true) then
-                    local p = getPos(obj.Parent)
-                    if p and rootPart then
-                        rootPart.CFrame = CFrame.new(p + Vector3.new(0, 6, 0))
-                        return true
-                    end
+            if matchesKw(obj.ActionText) or matchesKw(obj.ObjectText) then
+                local p = getPos(obj.Parent)
+                if p and rootPart then
+                    rootPart.CFrame = CFrame.new(p + Vector3.new(0, 6, 0))
+                    return true
                 end
             end
         end
     end
+    -- 2. Check object names in workspace
     for _, obj in ipairs(workspace:GetDescendants()) do
-        if obj:IsA("Model") or obj:IsA("BasePart") then
-            for _, k in ipairs(kw) do
-                if obj.Name:lower():find(k, 1, true) then
-                    local p = getPos(obj)
-                    if p and rootPart then
-                        rootPart.CFrame = CFrame.new(p + Vector3.new(0, 6, 0))
-                        return true
-                    end
-                end
+        if (obj:IsA("Model") or obj:IsA("BasePart") or obj:IsA("NPC")) and matchesKw(obj.Name) then
+            local p = getPos(obj)
+            if p and rootPart then
+                rootPart.CFrame = CFrame.new(p + Vector3.new(0, 6, 0))
+                return true
             end
         end
     end
