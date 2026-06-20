@@ -8,18 +8,20 @@ local unpack_ = table.unpack or unpack
 
 local player    = Players.LocalPlayer
 local character = player.Character
-local rootPart  = nil
+local rootPart  = character and character:FindFirstChild("HumanoidRootPart") or nil
 
 local function onCharacter(c)
     character = c
-    rootPart  = c:WaitForChild("HumanoidRootPart", 10)
+    task.spawn(function()
+        rootPart = c:WaitForChild("HumanoidRootPart", 10)
+    end)
 end
 
-if character then
-    onCharacter(character)
-else
-    player.CharacterAdded:Wait()
-    onCharacter(player.Character)
+if not character then
+    task.spawn(function()
+        character = player.CharacterAdded:Wait()
+        onCharacter(character)
+    end)
 end
 player.CharacterAdded:Connect(onCharacter)
 
@@ -1628,3 +1630,46 @@ workspace.DescendantRemoving:Connect(function(obj)
 end)
 
 setTab("crops")
+
+task.spawn(function()
+    local notif = Instance.new("ScreenGui")
+    notif.Name           = "GardenNotif"
+    notif.ResetOnSpawn   = false
+    notif.IgnoreGuiInset = true
+    notif.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    notif.Parent         = player.PlayerGui
+
+    local box = Instance.new("Frame", notif)
+    box.Size             = UDim2.new(0, 280, 0, 60)
+    box.Position         = UDim2.new(0.5, -140, 0, 20)
+    box.BackgroundColor3 = Color3.fromRGB(18, 18, 18)
+    box.BorderSizePixel  = 0
+    Instance.new("UICorner", box).CornerRadius = UDim.new(0, 10)
+    local st = Instance.new("UIStroke", box)
+    st.Color = Color3.fromRGB(50, 200, 100); st.Thickness = 1.5
+
+    local lbl = Instance.new("TextLabel", box)
+    lbl.Size                   = UDim2.new(1, -10, 0, 30)
+    lbl.Position               = UDim2.new(0, 5, 0, 4)
+    lbl.BackgroundTransparency = 1
+    lbl.Text                   = "🌿  Garden Dev Menu — Loaded!"
+    lbl.TextColor3             = Color3.fromRGB(50, 200, 100)
+    lbl.Font                   = Enum.Font.GothamBold
+    lbl.TextSize               = 15
+
+    local sub = Instance.new("TextLabel", box)
+    sub.Size                   = UDim2.new(1, -10, 0, 20)
+    sub.Position               = UDim2.new(0, 5, 0, 34)
+    sub.BackgroundTransparency = 1
+    sub.Text                   = "اضغط RightShift او زر Dev Menu يسار الشاشة"
+    sub.TextColor3             = Color3.fromRGB(150, 150, 150)
+    sub.Font                   = Enum.Font.Gotham
+    sub.TextSize               = 12
+
+    task.wait(5)
+    TweenService:Create(box, TweenInfo.new(0.5), {BackgroundTransparency = 1}):Play()
+    TweenService:Create(lbl, TweenInfo.new(0.5), {TextTransparency = 1}):Play()
+    TweenService:Create(sub, TweenInfo.new(0.5), {TextTransparency = 1}):Play()
+    task.wait(0.6)
+    notif:Destroy()
+end)
